@@ -25,7 +25,7 @@ Total: 210 (HIGH: 164, CRITICAL: 46)
 .....................
 ```
 
-*Identify any high-risk vulnerabilities present*: [Link here]()
+*Identify any high-risk vulnerabilities present*: [Link here](https://github.com/ladung/socone-test/blob/main/soc/section5/report.html)
 
 **2. Image Hardening:**
 
