@@ -1,0 +1,32 @@
+
+FROM ubuntu:22.04
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    ubuntu-desktop \
+    x11vnc \
+    xvfb \
+    xterm \
+    gnome-panel \
+    gnome-settings-daemon \
+    metacity \
+    nautilus \
+    gnome-terminal \
+    firefox
+
+# Set up a user and its password
+RUN useradd -m -s /bin/bash employee
+RUN echo 'employee:password' | chpasswd
+
+# Set up environment variables
+ENV USER employee
+ENV HOME /home/employee
+
+EXPOSE 5901
+
+# Start the VNC server
+CMD ["x11vnc", "-forever", "-usepw", "-create"]
+
+# To run SSH service, uncomment the following lines:
+# RUN apt-get install -y openssh-server
+# EXPOSE 22
+# CMD ["/usr/sbin/sshd", "-D"]

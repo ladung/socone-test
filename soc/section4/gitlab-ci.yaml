@@ -1,0 +1,112 @@
+stages:
+  - build
+  - testing
+  - deploy
+variables:
+  APPLICATION: $CI_PROJECT_NAME
+  VERSION: $ENV-$CI_COMMIT_SHORT_SHA
+  IMAGE_FIX: $DOCKER_REGISTRY_HOST/$APPLICATION:$ENV
+  IMAGE_BACKUP: $DOCKER_REGISTRY_HOST/$APPLICATION:$VERSION
+  ECR_REPO: $DOCKER_REGISTRY_HOST/$APPLICATION
+
+.before_script_template: &before_script_template
+  before_script:
+    - if [ "$CI_COMMIT_BRANCH" == "dev" ]; then ENV="dev"; fi
+    - if [ "$CI_COMMIT_BRANCH" == "staging" ]; then ENV="staging"; fi
+    - if [ "$CI_COMMIT_BRANCH" == "master" ]; then ENV="production"; fi
+
+.rules_template: &rules_template
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+      when: always
+    - if: '$CI_COMMIT_BRANCH != "dev"'
+      when: never
+
+
+.assume_role_template:
+  image:
+    name: gcr.io/kaniko-project/executor:v1.9.1-debug
+    entrypoint: [""]
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://git.dungla.dev  # example url gitlan selfhost
+  before_script:
+    - mkdir -p ~/.aws
+    - echo "${GITLAB_OIDC_TOKEN}" > ~/.aws/web_identity_token
+    - echo -e "[profile default]\nrole_arn=${ROLE_ARN}\nweb_identity_token_file=/root/.aws/web_identity_token" > ~/.aws/config
+    - mkdir -p /kaniko/.docker
+    - >-
+      echo "{ \"credsStore\": \"ecr-login\" }" > /kaniko/.docker/config.json
+    - cat /kaniko/.docker/config.json
+
+  variables:
+    AWS_REGION: ap-southeast-1
+
+
+.tags_template: &tags_template
+  tags:
+    - dev
+
+.scipt_backend_template: &scipt_backend_template
+  script:
+    - if [ "$CI_COMMIT_BRANCH" == "dev" ]; then ENV="dev"; fi
+    - |
+      /kaniko/executor --context $CI_PROJECT_DIR/CAM.Api --dockerfile $CI_PROJECT_DIR/Dockerfile \
+      --cache=true --cache-repo $ECR_REPO-cache   \
+      --log-timestamp --verbosity info \
+      --ignore-path=/root/.aws \
+      --destination $ECR_REPO \
+      --destination $ECR_REPO:$ENV-$CI_COMMIT_SHORT_SHA
+
+.testing: &testing
+  image: unitest_image:latest
+  before_script:
+    # example
+    - echo "Running automated tests..."
+    - yarn global add jest
+    - yarn add --dev jest-junit
+  script:
+    - jest --ci --reporters=default --reporters=jest-junit
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - junit.xml
+  after_script:
+    - echo "Test stage completed."
+
+
+.deploy_template: &deploy_template
+  image: ladung/docker-ci-aws:v1   # Custom image containing deploy script in section 2
+  script:
+    - echo "Deploying Docker image to the development server..."
+    - >
+      aws ecr get-login-password --region $AWS_DEFAULT_REGION |
+      docker login --username AWS --password-stdin $DOCKER_REGISTRY_HOST
+    - ./deploy.sh $ENV $VERSION
+
+
+build_image:
+  stage: build
+  extends:
+    - .rules_template #run only branch dev
+    - .before_script_template
+    - .assume_role_template
+    - .scipt_backend_template
+    - .tags_template
+
+unit_test:
+  stage: testing
+  extends:
+    - .rules_template #run only branch dev
+    - .before_script_template
+    - .testing
+
+deploy:
+  stage: deploy
+  needs:
+    - unit_test
+  extends:
+    - .rules_template #run only branch dev
+    - .before_script_template
+    - .deploy_template
